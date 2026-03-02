@@ -1,0 +1,302 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - README.md
+      - docs/*
+
+variables:
+  TF_WORKING_DIR:     'infra'
+  SERVICE_CONNECTION: 'Azure-Service-Connection'   # ← Update this
+  BACKEND_RG:         'rg-terraform-state'
+  BACKEND_SA:         'stterraformstate'
+  BACKEND_CONTAINER:  'tfstate'
+  BACKEND_KEY:        'mlops-pipeline/terraform.tfstate'
+  ML_WORKSPACE:       'mlw-mlops-dev'
+  RESOURCE_GROUP:     'rg-mlops-dev'
+  ACCURACY_THRESHOLD: '0.85'
+
+stages:
+
+# ──────────────────────────────────────────
+# STAGE 1: Terraform Init + Validate
+# ──────────────────────────────────────────
+- stage: TerraformInit
+  displayName: '1 — Terraform Init & Validate'
+  jobs:
+  - job: Init
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        backendServiceArm: '$(SERVICE_CONNECTION)'
+        backendAzureRmResourceGroupName: '$(BACKEND_RG)'
+        backendAzureRmStorageAccountName: '$(BACKEND_SA)'
+        backendAzureRmContainerName: '$(BACKEND_CONTAINER)'
+        backendAzureRmKey: '$(BACKEND_KEY)'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Validate'
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+        workingDirectory: '$(TF_WORKING_DIR)'
+
+# ──────────────────────────────────────────
+# STAGE 2: Terraform Plan
+# ──────────────────────────────────────────
+- stage: TerraformPlan
+  displayName: '2 — Terraform Plan'
+  dependsOn: TerraformInit
+  jobs:
+  - job: Plan
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Plan'
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+        commandOptions: '-var-file="dev.tfvars" -out=tfplan'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Plan Artifact'
+      inputs:
+        targetPath: '$(TF_WORKING_DIR)/tfplan'
+        artifact: 'terraform-plan'
+
+# ──────────────────────────────────────────
+# STAGE 3: Manual Approval — Review Plan
+# ──────────────────────────────────────────
+- stage: ManualApproval
+  displayName: '3 — Manual Approval'
+  dependsOn: TerraformPlan
+  jobs:
+  - job: WaitForApproval
+    pool: server
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 60
+      inputs:
+        instructions: 'Review Terraform plan. Approve to provision MLOps infrastructure.'
+        onTimeout: 'reject'
+
+# ──────────────────────────────────────────
+# STAGE 4: Terraform Apply
+# ──────────────────────────────────────────
+- stage: TerraformApply
+  displayName: '4 — Terraform Apply'
+  dependsOn: ManualApproval
+  condition: succeeded()
+  jobs:
+  - job: Apply
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifact: 'terraform-plan'
+        path: '$(TF_WORKING_DIR)'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Apply'
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+        commandOptions: 'tfplan'
+
+# ──────────────────────────────────────────
+# STAGE 5: Data Validation
+# ──────────────────────────────────────────
+- stage: DataValidation
+  displayName: '5 — Data Validation'
+  dependsOn: TerraformApply
+  jobs:
+  - job: ValidateData
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+
+    - script: |
+        pip install great-expectations pandas azure-storage-blob
+      displayName: 'Install dependencies'
+
+    - script: |
+        python training/validate_data.py \
+          --storage-account $(STORAGE_ACCOUNT_NAME) \
+          --container training-data
+      displayName: 'Validate training data schema + quality'
+
+# ──────────────────────────────────────────
+# STAGE 6: Azure ML Training Job
+# ──────────────────────────────────────────
+- stage: TrainModel
+  displayName: '6 — Train Model'
+  dependsOn: DataValidation
+  condition: succeeded()
+  jobs:
+  - job: AzureMLTraining
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Submit Azure ML Training Job'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az extension add --name ml
+          JOB_NAME=$(az ml job create \
+            --file training/train-job.yml \
+            --workspace-name $(ML_WORKSPACE) \
+            --resource-group $(RESOURCE_GROUP) \
+            --query name -o tsv)
+          echo "Training job submitted: $JOB_NAME"
+
+          # Wait for job to complete
+          az ml job stream \
+            --name $JOB_NAME \
+            --workspace-name $(ML_WORKSPACE) \
+            --resource-group $(RESOURCE_GROUP)
+
+          echo "##vso[task.setvariable variable=JOB_NAME;isOutput=true]$JOB_NAME"
+      name: TrainingJob
+
+# ──────────────────────────────────────────
+# STAGE 7: Accuracy Quality Gate
+# ──────────────────────────────────────────
+- stage: QualityGate
+  displayName: '7 — Accuracy Quality Gate'
+  dependsOn: TrainModel
+  condition: succeeded()
+  jobs:
+  - job: AccuracyCheck
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+
+    - script: pip install azure-ai-ml mlflow
+      displayName: 'Install ML SDK'
+
+    - task: AzureCLI@2
+      displayName: 'Check Model Accuracy — Gate'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          python evaluation/check_accuracy.py \
+            --workspace $(ML_WORKSPACE) \
+            --resource-group $(RESOURCE_GROUP) \
+            --threshold $(ACCURACY_THRESHOLD)
+          # Script exits with code 1 if accuracy < threshold
+          # This fails the pipeline stage — model does NOT deploy
+
+# ──────────────────────────────────────────
+# STAGE 8: Deploy to Staging Endpoint
+# ──────────────────────────────────────────
+- stage: DeployStaging
+  displayName: '8 — Deploy to Staging'
+  dependsOn: QualityGate
+  condition: succeeded()
+  jobs:
+  - job: DeployToStaging
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Deploy Model to Staging Endpoint'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az ml online-deployment create \
+            --file deployment/staging-deployment.yml \
+            --workspace-name $(ML_WORKSPACE) \
+            --resource-group $(RESOURCE_GROUP)
+
+    - script: |
+        python evaluation/load_test.py \
+          --endpoint-url $(STAGING_ENDPOINT_URL) \
+          --requests 100
+      displayName: 'Load Test Staging Endpoint (k6)'
+
+# ──────────────────────────────────────────
+# STAGE 9: Manual Approval — Promote to Prod
+# ──────────────────────────────────────────
+- stage: ApproveProduction
+  displayName: '9 — Approve Production'
+  dependsOn: DeployStaging
+  condition: succeeded()
+  jobs:
+  - job: WaitForApproval
+    pool: server
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440   # 24 hours
+      inputs:
+        instructions: |
+          Staging deployment passed load test.
+          Review accuracy metrics in App Insights before promoting to production.
+          Approve to swap staging → production.
+        onTimeout: 'reject'
+
+# ──────────────────────────────────────────
+# STAGE 10: Promote to Production
+# ──────────────────────────────────────────
+- stage: DeployProduction
+  displayName: '10 — Deploy to Production'
+  dependsOn: ApproveProduction
+  condition: succeeded()
+  jobs:
+  - job: DeployToProduction
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Promote Model to Production Endpoint'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az ml online-deployment create \
+            --file deployment/prod-deployment.yml \
+            --workspace-name $(ML_WORKSPACE) \
+            --resource-group $(RESOURCE_GROUP)
+
+    # Post-deploy health check
+    - script: |
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $(PROD_ENDPOINT_KEY)" \
+          $(PROD_ENDPOINT_URL)/health)
+        if [ "$STATUS" != "200" ]; then
+          echo "❌ Production health check failed: $STATUS"
+          exit 1
+        fi
+        echo "✅ Production health check passed"
+      displayName: 'Production Health Check'

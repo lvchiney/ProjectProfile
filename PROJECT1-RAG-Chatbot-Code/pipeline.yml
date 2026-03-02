@@ -1,0 +1,193 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  TF_WORKING_DIR: 'infra'
+  SERVICE_CONNECTION: 'Azure-Service-Connection'   # Update with your service connection name
+  BACKEND_RG: 'rg-terraform-state'
+  BACKEND_SA: 'stterraformstate'
+  BACKEND_CONTAINER: 'tfstate'
+  BACKEND_KEY: 'rag-chatbot/terraform.tfstate'
+
+stages:
+
+# ──────────────────────────────────────────
+# STAGE 1: Build + Unit Test (Node.js)
+# ──────────────────────────────────────────
+- stage: Build
+  displayName: 'Build & Test'
+  jobs:
+  - job: BuildTest
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '18.x'
+
+    - script: |
+        cd api
+        npm install
+        npm test
+      displayName: 'Install & Test Node.js API'
+
+# ──────────────────────────────────────────
+# STAGE 2: Terraform Init + Validate
+# ──────────────────────────────────────────
+- stage: TerraformInit
+  displayName: 'Terraform Init & Validate'
+  dependsOn: Build
+  jobs:
+  - job: Init
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        backendServiceArm: '$(SERVICE_CONNECTION)'
+        backendAzureRmResourceGroupName: '$(BACKEND_RG)'
+        backendAzureRmStorageAccountName: '$(BACKEND_SA)'
+        backendAzureRmContainerName: '$(BACKEND_CONTAINER)'
+        backendAzureRmKey: '$(BACKEND_KEY)'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Validate'
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+        workingDirectory: '$(TF_WORKING_DIR)'
+
+# ──────────────────────────────────────────
+# STAGE 3: Terraform Plan
+# ──────────────────────────────────────────
+- stage: TerraformPlan
+  displayName: 'Terraform Plan'
+  dependsOn: TerraformInit
+  jobs:
+  - job: Plan
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Plan'
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+        commandOptions: '-var-file="dev.tfvars" -out=tfplan'
+
+    # Save plan as artifact for review
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Plan Artifact'
+      inputs:
+        targetPath: '$(TF_WORKING_DIR)/tfplan'
+        artifact: 'terraform-plan'
+
+# ──────────────────────────────────────────
+# STAGE 4: Manual Approval
+# ──────────────────────────────────────────
+- stage: ManualApproval
+  displayName: 'Manual Approval — Review Plan'
+  dependsOn: TerraformPlan
+  jobs:
+  - job: WaitForApproval
+    pool: server
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 60
+      inputs:
+        instructions: |
+          Review the Terraform plan artifact before proceeding.
+          Check: resources being created, modified, or destroyed.
+          Approve only if the plan looks correct.
+        onTimeout: 'reject'
+
+# ──────────────────────────────────────────
+# STAGE 5: Terraform Apply (Dev)
+# ──────────────────────────────────────────
+- stage: TerraformApplyDev
+  displayName: 'Terraform Apply — Dev'
+  dependsOn: ManualApproval
+  condition: succeeded()
+  jobs:
+  - job: Apply
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifact: 'terraform-plan'
+        path: '$(TF_WORKING_DIR)'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Apply'
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+        commandOptions: 'tfplan'
+
+# ──────────────────────────────────────────
+# STAGE 6: Deploy App to Dev
+# ──────────────────────────────────────────
+- stage: DeployDev
+  displayName: 'Deploy App — Dev'
+  dependsOn: TerraformApplyDev
+  jobs:
+  - job: Deploy
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '18.x'
+
+    - script: |
+        cd api
+        npm install --production
+        zip -r ../app.zip .
+      displayName: 'Package API'
+
+    - task: AzureWebApp@1
+      displayName: 'Deploy to Staging Slot'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        appType: 'webAppLinux'
+        appName: 'app-rag-api-dev'
+        deployToSlotOrASE: true
+        resourceGroupName: 'rg-rag-chatbot-dev'
+        slotName: 'staging'
+        package: 'app.zip'
+
+    # Smoke test staging slot
+    - script: |
+        STAGING_URL="https://app-rag-api-dev-staging.azurewebsites.net/health"
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" $STAGING_URL)
+        if [ "$STATUS" != "200" ]; then
+          echo "Health check failed with status $STATUS"
+          exit 1
+        fi
+        echo "Health check passed ✅"
+      displayName: 'Smoke Test Staging Slot'
+
+    # Swap staging → production (Blue/Green)
+    - task: AzureAppServiceManage@0
+      displayName: 'Swap to Production (Blue/Green)'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        action: 'Swap Slots'
+        webAppName: 'app-rag-api-dev'
+        resourceGroupName: 'rg-rag-chatbot-dev'
+        sourceSlot: 'staging'

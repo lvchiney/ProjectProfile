@@ -1,0 +1,43 @@
+# train-job.yml — Azure ML Training Job Definition
+# Submitted via: az ml job create --file train-job.yml
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+
+type: command
+
+display_name: mlops-training-job
+experiment_name: mlops-pipeline
+
+# Training script
+command: >-
+  python train.py
+  --data-path ${{inputs.training_data}}
+  --model-output ${{outputs.model_output}}
+  --accuracy-threshold $ACCURACY_THRESHOLD
+
+# Environment — use Azure ML curated env or custom
+environment: azureml:AzureML-sklearn-1.0-ubuntu20.04-py38-cpu@latest
+
+# Compute target
+compute: azureml:cpu-cluster-dev
+
+# Inputs from blob storage
+inputs:
+  training_data:
+    type: uri_folder
+    path: azureml://datastores/workspaceblobstore/paths/training-data/
+
+# Outputs — model saved here after training
+outputs:
+  model_output:
+    type: mlflow_model
+    path: azureml://datastores/workspaceblobstore/paths/model-artifacts/
+
+# Resource limits
+resources:
+  instance_count: 1
+
+# Tags for tracking
+tags:
+  latest_run: "true"
+  pipeline: "mlops-azure-devops"

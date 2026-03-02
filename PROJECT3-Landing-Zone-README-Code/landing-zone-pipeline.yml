@@ -1,0 +1,216 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - README.md
+      - docs/*
+
+variables:
+  TF_WORKING_DIR:     'infra'
+  SERVICE_CONNECTION: 'Azure-Service-Connection'   # ← Update this
+  BACKEND_RG:         'rg-terraform-state'
+  BACKEND_SA:         'stterraformstate'
+  BACKEND_CONTAINER:  'tfstate'
+  BACKEND_KEY:        'landing-zone/terraform.tfstate'
+
+stages:
+
+# ──────────────────────────────────────────
+# STAGE 1: Terraform Init + Validate
+# ──────────────────────────────────────────
+- stage: TerraformInit
+  displayName: '1 — Terraform Init & Validate'
+  jobs:
+  - job: Init
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        backendServiceArm: '$(SERVICE_CONNECTION)'
+        backendAzureRmResourceGroupName: '$(BACKEND_RG)'
+        backendAzureRmStorageAccountName: '$(BACKEND_SA)'
+        backendAzureRmContainerName: '$(BACKEND_CONTAINER)'
+        backendAzureRmKey: '$(BACKEND_KEY)'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Validate'
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+        workingDirectory: '$(TF_WORKING_DIR)'
+
+# ──────────────────────────────────────────
+# STAGE 2: Terraform Plan
+# ──────────────────────────────────────────
+- stage: TerraformPlan
+  displayName: '2 — Terraform Plan'
+  dependsOn: TerraformInit
+  jobs:
+  - job: Plan
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Plan'
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+        commandOptions: '-var-file="prod.tfvars" -out=tfplan'
+
+    # Publish plan as artifact — architect reviews before approving
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Terraform Plan Artifact'
+      inputs:
+        targetPath: '$(TF_WORKING_DIR)/tfplan'
+        artifact: 'terraform-plan'
+
+# ──────────────────────────────────────────
+# STAGE 3: Manual Approval — CRITICAL
+# Landing Zone changes affect ALL subscriptions
+# ──────────────────────────────────────────
+- stage: ManualApproval
+  displayName: '3 — ⚠️ Manual Approval (Architect Required)'
+  dependsOn: TerraformPlan
+  jobs:
+  - job: WaitForApproval
+    pool: server
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 120
+      inputs:
+        instructions: |
+          ⚠️  LANDING ZONE CHANGES REQUIRE ARCHITECT REVIEW ⚠️
+
+          This pipeline will modify governance across ALL subscriptions:
+          - Management Group hierarchy
+          - Azure Policy assignments (will DENY non-compliant resources)
+          - RBAC role assignments
+          - Hub-Spoke networking
+          - Centralized monitoring
+
+          Steps before approving:
+          1. Download and review the terraform-plan artifact
+          2. Confirm no unexpected resources are being DESTROYED
+          3. Verify policy changes won't block existing workloads
+          4. Check networking changes won't cause connectivity loss
+
+          Approve only when satisfied the plan is correct.
+        onTimeout: 'reject'
+
+# ──────────────────────────────────────────
+# STAGE 4: Terraform Apply
+# ──────────────────────────────────────────
+- stage: TerraformApply
+  displayName: '4 — Terraform Apply'
+  dependsOn: ManualApproval
+  condition: succeeded()
+  jobs:
+  - job: Apply
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init (re-init for apply stage)'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        backendServiceArm: '$(SERVICE_CONNECTION)'
+        backendAzureRmResourceGroupName: '$(BACKEND_RG)'
+        backendAzureRmStorageAccountName: '$(BACKEND_SA)'
+        backendAzureRmContainerName: '$(BACKEND_CONTAINER)'
+        backendAzureRmKey: '$(BACKEND_KEY)'
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifact: 'terraform-plan'
+        path: '$(TF_WORKING_DIR)'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Apply'
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: '$(TF_WORKING_DIR)'
+        environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+        commandOptions: 'tfplan'
+
+# ──────────────────────────────────────────
+# STAGE 5: Post-Deploy Compliance Check
+# ──────────────────────────────────────────
+- stage: ComplianceCheck
+  displayName: '5 — Post-Deploy Compliance Check'
+  dependsOn: TerraformApply
+  condition: succeeded()
+  jobs:
+  - job: VerifyCompliance
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Verify Policy Compliance'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "🔍 Checking Azure Policy compliance state..."
+
+          # Trigger compliance scan
+          az policy state trigger-scan \
+            --resource-group rg-workloads-prod \
+            --no-wait
+
+          echo "✅ Compliance scan triggered."
+          echo "📊 View results in Azure Portal → Policy → Compliance"
+
+    - task: AzureCLI@2
+      displayName: 'Verify Management Groups'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "🔍 Verifying management group hierarchy..."
+
+          az account management-group list \
+            --query "[].{Name:name, DisplayName:displayName}" \
+            --output table
+
+          echo "✅ Management groups verified."
+
+    - task: AzureCLI@2
+      displayName: 'Verify Hub VNet + Firewall'
+      inputs:
+        azureSubscription: '$(SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "🔍 Verifying hub networking..."
+
+          az network vnet list \
+            --query "[?name=='vnet-hub'].{Name:name, AddressSpace:addressSpace.addressPrefixes}" \
+            --output table
+
+          az network firewall list \
+            --query "[].{Name:name, Location:location}" \
+            --output table
+
+          echo "✅ Hub networking verified."

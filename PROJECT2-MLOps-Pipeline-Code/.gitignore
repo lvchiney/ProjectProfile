@@ -1,0 +1,86 @@
+# =============================================
+# Terraform .gitignore
+# =============================================
+
+# Local .terraform directory (downloaded providers + modules)
+**/.terraform/*
+
+# Terraform lock file — KEEP this in git (ensures consistent provider versions)
+# .terraform.lock.hcl   ← do NOT ignore this one
+
+# Terraform plan files — may contain sensitive data
+*.tfplan
+tfplan
+
+# Terraform state files — NEVER commit these to git
+# State is stored in Azure Blob Storage (remote backend)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform variable files with secrets
+*.auto.tfvars
+secrets.tfvars
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Override files (local developer overrides)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ignore CLI config file
+.terraformrc
+terraform.rc
+
+# =============================================
+# Node.js (API)
+# =============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.local
+.env.development
+.env.production
+dist/
+
+# =============================================
+# Angular (UI)
+# =============================================
+/ui/dist/
+/ui/.angular/
+/ui/node_modules/
+
+# =============================================
+# Python (MLOps training scripts)
+# =============================================
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+.venv/
+venv/
+*.pkl
+*.joblib
+
+# =============================================
+# OS / IDE
+# =============================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =============================================
+# Azure DevOps artifacts
+# =============================================
+drop/
+artifacts/
