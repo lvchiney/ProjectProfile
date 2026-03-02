@@ -153,4 +153,4 @@ Stage 5 — Post-Deploy Compliance Check (policy scan + MG + network verificatio
 
 ---
 
-*Project 3 of 3 — Azure Landing Zone | Built by [Your Name] | AZ-305 | AZ-400*
+*Project 3 of 3 — Azure Landing Zone | Built by Prasenjit Chiney. | AZ-305 | AZ-400*
