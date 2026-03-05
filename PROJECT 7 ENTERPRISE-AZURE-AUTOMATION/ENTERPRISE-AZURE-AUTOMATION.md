@@ -1,5 +1,5 @@
 # Enterprise Azure Automation Workbooks
-## DevSecOps Automation Portfolio | KPMG | 16 Years Experience
+## DevSecOps Automation Portfolio 
 
 > **Technology:** Azure Automation Runbooks (PowerShell) + Python Scripts
 > **Auth Pattern:** Managed Identity (zero stored credentials)
@@ -825,9 +825,9 @@ Alert: Security Score Dropped
 
 ### Portfolio Showcase Statement
 
-> *"At KPMG, I designed and delivered an enterprise Azure automation platform covering 6 critical operational areas — VM cost optimisation, stale resource governance, security auto-remediation, intelligent AKS scaling, certificate lifecycle management, and identity hygiene. Using Azure Automation Runbooks (PowerShell) and Python scripts with Managed Identity authentication, the platform saved over £288,000 annually across client environments while reducing the security attack surface by 35% and eliminating certificate-related production incidents entirely."*
+> *"I designed and delivered an enterprise Azure automation platform covering 6 critical operational areas — VM cost optimisation, stale resource governance, security auto-remediation, intelligent AKS scaling, certificate lifecycle management, and identity hygiene. Using Azure Automation Runbooks (PowerShell) and Python scripts with Managed Identity authentication, the platform saved over £288,000 annually across client environments while reducing the security attack surface by 35% and eliminating certificate-related production incidents entirely."*
 
 ---
 
-*Enterprise Azure Automation Portfolio | DevSecOps | KPMG | 16 Years Experience*
+*Enterprise Azure Automation Portfolio | DevSecOps *
 *PowerShell + Python | Managed Identity | Log Analytics | Microsoft Teams*
