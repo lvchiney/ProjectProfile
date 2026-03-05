@@ -1,7 +1,7 @@
 # Enterprise Azure Policy Framework
 ## Terraform | Management Group Scope | All Policy Effects
 
-> **Author:** Enterprise DevSecOps Architect | KPMG
+> **Author:** Prasenjit Chiney
 > **Scope:** Multi-Subscription via Management Groups
 > **IaC:** Terraform ~> 3.80 | Azure Provider
 > **Coverage:** 6 Categories | 30+ Policies | All Effects
