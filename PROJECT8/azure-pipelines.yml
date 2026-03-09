@@ -1,0 +1,94 @@
+# azure-pipelines.yml
+# Implements the multi-stage pipeline shown in the architecture diagram.
+# Flow: Git Push → Logic Layer (YAML Parameters) → Stage:Dev → Stage:Prod
+#       with shared Remote State in Azure Blob Storage
+
+trigger:
+  branches:
+    include:
+      - main
+
+# ── LOGIC LAYER: YAML Parameters ──────────────────────────────────────────────
+parameters:
+  - name: environments
+    type: object
+    default:
+      - name: dev
+        serviceConnection: sc-dev         # SvcConn for Subscription A
+        tfvarsFile: envs/dev/dev.tfvars
+        workspace: dev
+        backendKey: env/dev/main.tfstate
+        dependsOn: []
+
+      - name: prod
+        serviceConnection: sc-prod        # SvcConn for Subscription B
+        tfvarsFile: envs/prod/prod.tfvars
+        workspace: prod
+        backendKey: env/prod/main.tfstate
+        dependsOn: [dev]
+
+variables:
+  TF_VERSION: "1.7.0"
+  BACKEND_RG: "rg-terraform-state"
+  BACKEND_SA: "stterraformstate"
+  BACKEND_CONTAINER: "tfstate"
+
+# ── STAGE TEMPLATE (one stage per environment) ────────────────────────────────
+stages:
+  - ${{ each env in parameters.environments }}:
+
+    - stage: ${{ upper(env.name) }}
+      displayName: "Stage: ${{ env.name }}"
+      dependsOn: ${{ env.dependsOn }}
+      jobs:
+        - job: Terraform_${{ env.name }}
+          displayName: "Terraform Init → Workspace → Plan/Apply [${{ env.name }}]"
+
+          steps:
+            # ── 1. Install Terraform ───────────────────────────────────────────
+            - task: TerraformInstaller@1
+              displayName: "Install Terraform $(TF_VERSION)"
+              inputs:
+                terraformVersion: $(TF_VERSION)
+
+            # ── 2. terraform init (backend points to Azure Blob Storage) ───────
+            - task: TerraformTaskV4@4
+              displayName: "Terraform Init"
+              inputs:
+                provider: azurerm
+                command: init
+                workingDirectory: "$(System.DefaultWorkingDirectory)"
+                backendServiceArm: ${{ env.serviceConnection }}
+                backendAzureRmResourceGroupName: $(BACKEND_RG)
+                backendAzureRmStorageAccountName: $(BACKEND_SA)
+                backendAzureRmContainerName: $(BACKEND_CONTAINER)
+                backendAzureRmKey: ${{ env.backendKey }}
+
+            # ── 3. Select / create workspace ──────────────────────────────────
+            - script: |
+                terraform workspace select ${{ env.workspace }} \
+                  || terraform workspace new ${{ env.workspace }}
+              displayName: "Workspace: select '${{ env.workspace }}'"
+              workingDirectory: "$(System.DefaultWorkingDirectory)"
+
+            # ── 4. terraform plan ─────────────────────────────────────────────
+            - task: TerraformTaskV4@4
+              displayName: "Terraform Plan"
+              inputs:
+                provider: azurerm
+                command: plan
+                workingDirectory: "$(System.DefaultWorkingDirectory)"
+                environmentServiceNameAzureRM: ${{ env.serviceConnection }}
+                commandOptions: >
+                  -var-file="${{ env.tfvarsFile }}"
+                  -out=tfplan-${{ env.name }}
+
+            # ── 5. terraform apply ────────────────────────────────────────────
+            - task: TerraformTaskV4@4
+              displayName: "Terraform Apply"
+              inputs:
+                provider: azurerm
+                command: apply
+                workingDirectory: "$(System.DefaultWorkingDirectory)"
+                environmentServiceNameAzureRM: ${{ env.serviceConnection }}
+                commandOptions: "tfplan-${{ env.name }}"
