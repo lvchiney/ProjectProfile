@@ -1,0 +1,54 @@
+parameters:
+  - name: environment
+    type: string
+  - name: serviceConnection
+    type: string
+  - name: tfvarsFile
+    type: string
+  - name: backendStorageAccount
+    type: string
+    default: "sttfstate"
+  - name: backendResourceGroup
+    type: string
+    default: "rg-terraform-state"
+  - name: backendContainer
+    type: string
+    default: "tfstate"
+
+steps:
+  - task: TerraformInstaller@1
+    displayName: "Install Terraform"
+    inputs:
+      terraformVersion: "latest"
+
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Init"
+    inputs:
+      provider: "azurerm"
+      command: "init"
+      backendServiceArm: ${{ parameters.serviceConnection }}
+      backendAzureRmResourceGroupName: ${{ parameters.backendResourceGroup }}
+      backendAzureRmStorageAccountName: ${{ parameters.backendStorageAccount }}
+      backendAzureRmContainerName: ${{ parameters.backendContainer }}
+      backendAzureRmKey: "env/${{ parameters.environment }}/main.tfstate"
+
+  - script: |
+      terraform workspace select ${{ parameters.environment }} \
+        || terraform workspace new ${{ parameters.environment }}
+    displayName: "Select Workspace: ${{ parameters.environment }}"
+
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Plan"
+    inputs:
+      provider: "azurerm"
+      command: "plan"
+      environmentServiceNameAzureRM: ${{ parameters.serviceConnection }}
+      commandOptions: "-var-file=${{ parameters.tfvarsFile }} -out=tfplan"
+
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Apply"
+    inputs:
+      provider: "azurerm"
+      command: "apply"
+      environmentServiceNameAzureRM: ${{ parameters.serviceConnection }}
+      commandOptions: "tfplan"

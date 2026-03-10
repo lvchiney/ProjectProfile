@@ -1,0 +1,68 @@
+# ============================================================
+# Azure DevOps Pipeline — Terraform Multi-Environment Deploy
+# Logic Layer: YAML Parameters drive stage behaviour
+# ============================================================
+
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  devEnvironment:     "dev"
+  devServiceConn:     "sc-dev"
+  devTfvarsFile:      "environments/dev/dev.tfvars"
+
+  prodEnvironment:    "prod"
+  prodServiceConn:    "sc-prod"
+  prodTfvarsFile:     "environments/prod/prod.tfvars"
+
+  backendStorageAcct: "sttfstate"
+  backendRG:          "rg-terraform-state"
+  backendContainer:   "tfstate"
+
+stages:
+
+  # Stage: Development → Subscription A
+  - stage: Development
+    displayName: "Deploy to Development (Subscription A)"
+    jobs:
+      - deployment: TerraformDev
+        displayName: "Terraform → dev via sc-dev"
+        environment: $(devEnvironment)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform-steps.yml
+                  parameters:
+                    environment:           $(devEnvironment)
+                    serviceConnection:     $(devServiceConn)
+                    tfvarsFile:            $(devTfvarsFile)
+                    backendStorageAccount: $(backendStorageAcct)
+                    backendResourceGroup:  $(backendRG)
+                    backendContainer:      $(backendContainer)
+
+  # Stage: Production → Subscription B (depends on Dev passing)
+  - stage: Production
+    displayName: "Deploy to Production (Subscription B)"
+    dependsOn: Development
+    condition: succeeded('Development')
+    jobs:
+      - deployment: TerraformProd
+        displayName: "Terraform → prod via sc-prod"
+        environment: $(prodEnvironment)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/terraform-steps.yml
+                  parameters:
+                    environment:           $(prodEnvironment)
+                    serviceConnection:     $(prodServiceConn)
+                    tfvarsFile:            $(prodTfvarsFile)
+                    backendStorageAccount: $(backendStorageAcct)
+                    backendResourceGroup:  $(backendRG)
+                    backendContainer:      $(backendContainer)
