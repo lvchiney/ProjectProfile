@@ -260,8 +260,9 @@ terraform {
 
 ### `modules/management_groups/main.tf`
 ```hcl
-resource "azurerm_management_group" "root" {
-  display_name = "Root Management Group"
+data "azurerm_management_group" "root" {
+  # This is usually the default name/ID for the top-level root
+  name = "Tenant Root Group" 
 }
 
 resource "azurerm_management_group" "platform" {
