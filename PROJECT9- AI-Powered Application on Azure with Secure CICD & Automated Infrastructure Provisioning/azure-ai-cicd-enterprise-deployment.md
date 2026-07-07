@@ -187,6 +187,18 @@ Before any `terraform apply`, the pipeline runs **Conftest / OPA** against the g
 11. **Blue-Green / Canary Deploy to Production**.
 12. **Post-Deploy Validation** — smoke tests, synthetic monitoring, automatic rollback trigger on SLO breach.
 
+**Notes:**  The DevSecOps Guardrail (How it is used)
+This ties directly into the concept of automated pipeline guardrails. Generating the SBOM is the first step in Software Supply Chain Security.
+
+Here is how the flow usually works in an enterprise CI/CD pipeline:
+
+Generate: The pipeline compiles the code and generates the SBOM JSON file.
+
+Scan: An automated security tool (like Trivy, Grype, or Microsoft Defender for Cloud) ingests the SBOM and cross-references that "ingredients list" against global databases of known security vulnerabilities (CVEs).
+
+Enforce: If the SBOM reveals that the build contains a critically vulnerable package (for example, an outdated version of Log4j), the security tool fails the build.
+
+Just like OPA/Conftest blocks a bad terraform apply, the SBOM scan acts as a guardrail preventing known vulnerable code from ever reaching an Azure App Service or AKS cluster. If a new vulnerability is discovered months later, security teams can instantly query the SBOMs of all running applications to see exactly which workloads contain the compromised ingredient, rather than having to manually guess or decompile code.
 ### 6.2 Azure DevOps YAML (abridged)
 
 ```yaml
