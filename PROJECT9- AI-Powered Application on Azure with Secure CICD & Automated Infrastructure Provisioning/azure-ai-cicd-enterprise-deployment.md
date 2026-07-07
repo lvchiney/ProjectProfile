@@ -202,6 +202,29 @@ Industry-standard tools include:
 Syft (by Anchore): Extremely fast, supports almost all languages, and outputs strictly formatted SBOMs.
 Trivy (by Aqua Security): Can both generate the SBOM and instantly scan it for vulnerabilities.
 
+**Static analysis** means examining code, configuration files, and histories for security flaws, bugs, and compliance issues without actually running the application.
+**The Three Pillars of Static Security Analysis**
+1. SAST (Static Application Security Testing)
+The Goal: Finding flaws, logic errors, and security vulnerabilities written directly into your custom source code.
+How it works: These tools parse your raw source code into an abstract mathematical tree to trace how data flows through your application. They look for unsafe patterns that could allow an attacker to exploit the system.
+The Tools: * CodeQL: GitHub’s semantic analysis engine. It treats code like data, allowing you to query your codebase using a SQL-like language to find complex security flaws (e.g., finding where untrusted user input directly flows into a database query without validation).
+Semgrep: A lightweight, ultra-fast static analysis tool that uses simple pattern-matching syntax to find bugs and enforce code standards.
+Real-World Example: Catching a SQL Injection vulnerability or an unsafe deserialization flaw in a Java controller before it gets compiled.
+2. Secret Scanning
+The Goal: Preventing highly sensitive credentials—like API tokens, encryption keys, and passwords—from being hardcoded and exposed in version control.
+How it works: These tools scan not only your current code but your entire Git commit history. They use regular expressions and high-entropy calculations to detect strings that look like structural secret tokens (e.g., an Azure Service Principal secret or an AWS Access Key).
+The Tools:
+Gitleaks: A fast, open-source tool dedicated strictly to scanning Git repositories for secrets.
+TruffleHog: A specialized scanner that digs deep into Git history, branches, and commits, verifying if found keys are active.
+Real-World Example: Detecting an accidental copy-paste of a production Azure Key Vault access key inside a Terraform file or a JavaScript configuration.
+3. Dependency Scanning
+The Goal: Identifying known security vulnerabilities in third-party libraries and open-source packages that your app relies on.
+How it works: This scanner looks at your project's manifest files (like package.json, pom.xml, or go.mod). It creates an internal ingredients list (similar to an SBOM) and cross-references your external dependencies against public vulnerability databases (like the National Vulnerability Database).
+The Tools:
+Dependabot: GitHub’s native automated scanner that alerts you to vulnerable packages and automatically opens Pull Requests to update them to safe versions.
+Snyk: A robust developer-security platform that analyzes deep dependency trees (including transient dependencies—dependencies of dependencies) and provides remediation guidance.
+Real-World Example: Flagging that your React application is using an older version of an npm package that contains an active Denial of Service (DoS) vulnerability.
+
 ### 6.2 Azure DevOps YAML (abridged)
 
 ```yaml
