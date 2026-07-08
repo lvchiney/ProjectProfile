@@ -187,43 +187,40 @@ Before any `terraform apply`, the pipeline runs **Conftest / OPA** against the g
 11. **Blue-Green / Canary Deploy to Production**.
 12. **Post-Deploy Validation** — smoke tests, synthetic monitoring, automatic rollback trigger on SLO breach.
 
-**Notes:**  The DevSecOps Guardrail (How it is used): This ties directly into the concept of automated pipeline guardrails. Generating the SBOM is the first step in Software Supply Chain Security. Here is how the flow usually works in an enterprise CI/CD pipeline:
-Generate: The pipeline compiles the code and generates the SBOM JSON file.
-Scan: An automated security tool (like Trivy, Grype, or Microsoft Defender for Cloud) ingests the SBOM and cross-references that "ingredients list" against global databases of known security vulnerabilities (CVEs).
-Enforce: If the SBOM reveals that the build contains a critically vulnerable package (for example, an outdated version of Log4j), the security tool fails the build.
-Just like OPA/Conftest blocks a bad terraform apply, the SBOM scan acts as a guardrail preventing known vulnerable code from ever reaching an Azure App Service or AKS cluster. If a new vulnerability is discovered months later, security teams can instantly query the SBOMs of all running applications to see exactly which workloads contain the compromised ingredient, rather than having to manually guess or decompile code.
-
-**To generate** a standardized SBOM (in a format like SPDX or CycloneDX), you must explicitly define it as a step in your pipeline using specialized tooling.
-Here is how enterprise environments typically handle this across different ecosystems.
-
-**Approaches to Generating SBOMs** - The "Universal Scanners" (Recommended for CI/CD): 
-Instead of configuring different plugins for React, Java, and Node, the modern DevSecOps approach uses a single universal CLI tool in the pipeline that scans the source directory or the final container image.
-Industry-standard tools include:
-Syft (by Anchore): Extremely fast, supports almost all languages, and outputs strictly formatted SBOMs.
-Trivy (by Aqua Security): Can both generate the SBOM and instantly scan it for vulnerabilities.
-
-**Static analysis** means examining code, configuration files, and histories for security flaws, bugs, and compliance issues without actually running the application.
-**The Three Pillars of Static Security Analysis**
+**Notes:**  DevSecOps Guardrails — Quick Summary
+SBOM (Software Bill of Materials)
+First step in supply chain security. Flow: Generate → Scan → Enforce.
+Generate — pipeline builds code, creates SBOM (SPDX/CycloneDX format).
+Scan — tools like Trivy, Grype, or Defender for Cloud check the SBOM against CVE databases.
+Enforce — if a critical vuln (e.g., old Log4j) is found, the build fails — same guardrail role as OPA/Conftest for Terraform.
+Bonus — lets teams instantly find which running apps use a compromised package when a new CVE drops.
+Generating SBOMs
+Best practice = universal CLI scanners instead of per-language plugins:
+Syft – fast, broad language support, clean SBOM output.
+Trivy – generates and scans SBOMs for vulnerabilities in one tool.
+SonarQube – complements this by continuously analyzing code quality and security hotspots, feeding results into the same pipeline gate as SBOM/dependency checks.
+Three Pillars of Static Security Analysis
 1. SAST (Static Application Security Testing)
-The Goal: Finding flaws, logic errors, and security vulnerabilities written directly into your custom source code.
-How it works: These tools parse your raw source code into an abstract mathematical tree to trace how data flows through your application. They look for unsafe patterns that could allow an attacker to exploit the system.
-The Tools: * CodeQL: GitHub’s semantic analysis engine. It treats code like data, allowing you to query your codebase using a SQL-like language to find complex security flaws (e.g., finding where untrusted user input directly flows into a database query without validation).
-Semgrep: A lightweight, ultra-fast static analysis tool that uses simple pattern-matching syntax to find bugs and enforce code standards.
-Real-World Example: Catching a SQL Injection vulnerability or an unsafe deserialization flaw in a Java controller before it gets compiled.
+Finds flaws in your own code by tracing data flow.
+CodeQL – semantic/query-based analysis (SQL-like queries over code).
+Semgrep – pattern-based, lightweight and fast.
+SonarQube – code quality + security rules; common enterprise standard for gating PRs on bugs, vulnerabilities, and code smells.
+Example: catching a SQL injection vulnerability before compile.
 2. Secret Scanning
-The Goal: Preventing highly sensitive credentials—like API tokens, encryption keys, and passwords—from being hardcoded and exposed in version control.
-How it works: These tools scan not only your current code but your entire Git commit history. They use regular expressions and high-entropy calculations to detect strings that look like structural secret tokens (e.g., an Azure Service Principal secret or an AWS Access Key).
-The Tools:
-Gitleaks: A fast, open-source tool dedicated strictly to scanning Git repositories for secrets.
-TruffleHog: A specialized scanner that digs deep into Git history, branches, and commits, verifying if found keys are active.
-Real-World Example: Detecting an accidental copy-paste of a production Azure Key Vault access key inside a Terraform file or a JavaScript configuration.
+Finds hardcoded credentials in code and git history.
+Gitleaks – fast, git-focused secret scanner.
+TruffleHog – deep git history scanning, verifies if found keys are active.
+Example: catching a leaked Azure Key Vault key inside a Terraform file.
 3. Dependency Scanning
-The Goal: Identifying known security vulnerabilities in third-party libraries and open-source packages that your app relies on.
-How it works: This scanner looks at your project's manifest files (like package.json, pom.xml, or go.mod). It creates an internal ingredients list (similar to an SBOM) and cross-references your external dependencies against public vulnerability databases (like the National Vulnerability Database).
-The Tools:
-Dependabot: GitHub’s native automated scanner that alerts you to vulnerable packages and automatically opens Pull Requests to update them to safe versions.
-Snyk: A robust developer-security platform that analyzes deep dependency trees (including transient dependencies—dependencies of dependencies) and provides remediation guidance.
-Real-World Example: Flagging that your React application is using an older version of an npm package that contains an active Denial of Service (DoS) vulnerability.
+Finds known vulnerabilities in third-party packages.
+Dependabot – GitHub-native, auto-opens PRs to patch vulnerable packages.
+Snyk – deep dependency tree analysis (including transitive dependencies) with remediation guidance.
+Trivy – also does dependency scanning, not just SBOM/image scanning.
+Example: flagging a vulnerable npm package version causing a DoS risk.
+Where Trivy & SonarQube Fit Overall
+Tool	Role
+Trivy	SBOM generation + vulnerability scanning + dependency/image scanning — the "universal scanner"
+SonarQube	SAST / code quality gate, sitting alongside CodeQL and Semgrep as a pipeline enforcement step
 
 ### 6.2 Azure DevOps YAML (abridged)
 
