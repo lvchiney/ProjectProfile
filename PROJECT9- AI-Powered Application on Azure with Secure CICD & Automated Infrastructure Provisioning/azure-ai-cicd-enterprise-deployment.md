@@ -187,40 +187,61 @@ Before any `terraform apply`, the pipeline runs **Conftest / OPA** against the g
 11. **Blue-Green / Canary Deploy to Production**.
 12. **Post-Deploy Validation** — smoke tests, synthetic monitoring, automatic rollback trigger on SLO breach.
 
-**Notes:**  DevSecOps Guardrails — Quick Summary
-SBOM (Software Bill of Materials)
-First step in supply chain security. Flow: Generate → Scan → Enforce.
-Generate — pipeline builds code, creates SBOM (SPDX/CycloneDX format).
-Scan — tools like Trivy, Grype, or Defender for Cloud check the SBOM against CVE databases.
-Enforce — if a critical vuln (e.g., old Log4j) is found, the build fails — same guardrail role as OPA/Conftest for Terraform.
-Bonus — lets teams instantly find which running apps use a compromised package when a new CVE drops.
-Generating SBOMs
+**Notes:**  
+# DevSecOps Guardrails — Quick Summary
+
+## SBOM (Software Bill of Materials)
+
+First step in supply chain security. Flow: **Generate → Scan → Enforce**.
+
+- **Generate** — pipeline builds code, creates SBOM (SPDX/CycloneDX format).
+- **Scan** — tools like **Trivy**, Grype, or Defender for Cloud check the SBOM against CVE databases.
+- **Enforce** — if a critical vuln (e.g., old Log4j) is found, the build fails — same guardrail role as OPA/Conftest for Terraform.
+- **Bonus** — lets teams instantly find which running apps use a compromised package when a new CVE drops.
+
+## Generating SBOMs
+
 Best practice = universal CLI scanners instead of per-language plugins:
-Syft – fast, broad language support, clean SBOM output.
-Trivy – generates and scans SBOMs for vulnerabilities in one tool.
-SonarQube – complements this by continuously analyzing code quality and security hotspots, feeding results into the same pipeline gate as SBOM/dependency checks.
-Three Pillars of Static Security Analysis
-1. SAST (Static Application Security Testing)
+
+- **Syft** – fast, broad language support, clean SBOM output.
+- **Trivy** – generates *and* scans SBOMs for vulnerabilities in one tool.
+- **SonarQube** – complements this by continuously analyzing code quality and security hotspots, feeding results into the same pipeline gate as SBOM/dependency checks.
+
+## Three Pillars of Static Security Analysis
+
+### 1. SAST (Static Application Security Testing)
 Finds flaws in your own code by tracing data flow.
-CodeQL – semantic/query-based analysis (SQL-like queries over code).
-Semgrep – pattern-based, lightweight and fast.
-SonarQube – code quality + security rules; common enterprise standard for gating PRs on bugs, vulnerabilities, and code smells.
-Example: catching a SQL injection vulnerability before compile.
-2. Secret Scanning
+
+- **CodeQL** – semantic/query-based analysis (SQL-like queries over code).
+- **Semgrep** – pattern-based, lightweight and fast.
+- **SonarQube** – code quality + security rules; common enterprise standard for gating PRs on bugs, vulnerabilities, and code smells.
+
+*Example:* catching a SQL injection vulnerability before compile.
+
+### 2. Secret Scanning
 Finds hardcoded credentials in code and git history.
-Gitleaks – fast, git-focused secret scanner.
-TruffleHog – deep git history scanning, verifies if found keys are active.
-Example: catching a leaked Azure Key Vault key inside a Terraform file.
-3. Dependency Scanning
+
+- **Gitleaks** – fast, git-focused secret scanner.
+- **TruffleHog** – deep git history scanning, verifies if found keys are active.
+
+*Example:* catching a leaked Azure Key Vault key inside a Terraform file.
+
+### 3. Dependency Scanning
 Finds known vulnerabilities in third-party packages.
-Dependabot – GitHub-native, auto-opens PRs to patch vulnerable packages.
-Snyk – deep dependency tree analysis (including transitive dependencies) with remediation guidance.
-Trivy – also does dependency scanning, not just SBOM/image scanning.
-Example: flagging a vulnerable npm package version causing a DoS risk.
-Where Trivy & SonarQube Fit Overall
-Tool	Role
-Trivy	SBOM generation + vulnerability scanning + dependency/image scanning — the "universal scanner"
-SonarQube	SAST / code quality gate, sitting alongside CodeQL and Semgrep as a pipeline enforcement step
+
+- **Dependabot** – GitHub-native, auto-opens PRs to patch vulnerable packages.
+- **Snyk** – deep dependency tree analysis (including transitive dependencies) with remediation guidance.
+- **Trivy** – also does dependency scanning, not just SBOM/image scanning.
+
+*Example:* flagging a vulnerable npm package version causing a DoS risk.
+
+## Where Trivy & SonarQube Fit Overall
+
+| Tool | Role |
+|---|---|
+| **Trivy** | SBOM generation + vulnerability scanning + dependency/image scanning — the "universal scanner" |
+| **SonarQube** | SAST / code quality gate, sitting alongside CodeQL and Semgrep as a pipeline enforcement step |
+
 
 ### 6.2 Azure DevOps YAML (abridged)
 
